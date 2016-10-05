@@ -1,0 +1,173 @@
+---
+title: "OBIS Records Map & Histogram"
+author: "Ben Best"
+date: "October 5, 2016"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+## load
+
+```{r setup, include=FALSE, echo=F}
+knitr::opts_chunk$set(echo=T, cache=T)
+```
+
+```{r load libraries & data}
+suppressPackageStartupMessages({
+  require(dplyr)
+  require(ggplot2)
+  library(rgdal)
+})
+  
+load("obis.dat")
+```
+
+## hist_gcs
+
+Summarize records by 5 decimal degrees and generate histogram with x-axis aligned in geographic coordinate system (gcs). 
+
+```{r summarize hist}
+d <- data %>%
+  filter(
+    latitude <= 90 | latitude >= -90,
+    !is.na(depth)) %>%
+  mutate(
+    zone = cut(depth, c(0, 20, 200, Inf), labels=c('< 20', '20 - 200', '> 200')),
+    band = round(latitude / 5) * 5) %>%
+  group_by(band, zone) %>%
+  summarize(
+    records = n())
+
+ggplot(d, aes(x = band, y = records, fill = zone)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_brewer(palette='YlGnBu', name='zone (m)') +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x='latitude')
+```
+
+
+## map_mol
+
+Summarize records using [`ggplot2::geom_bin2d()`](https://www.rdocumentation.org/packages/ggplot2/versions/2.1.0/topics/geom_bin2d) with `100` bins and `log10` scale to show variation and project to Mollweide (mol) for more area-realistic map. 
+
+```{r map_mol}
+n_bins = 100
+world = map_data('world')
+
+m = ggplot() +
+  geom_bin2d(
+    aes(x=longitude, y=latitude, fill=log10(..density..)), data = data, bins=n_bins) +
+  geom_map(data=world, map=world, aes(x=long, y=lat, map_id=region), fill = 'grey70') +
+  coord_map("mollweide", xlim=c(-180, 180)) +
+  scale_fill_distiller(type='div', palette='Spectral', name='log10(records)') +
+  theme(
+    panel.background=element_blank(),
+    axis.text.x=element_blank(), axis.ticks.x=element_blank(), # x ticks
+    axis.title.x=element_blank(),                              # x title
+    legend.position='bottom')
+
+# save plot
+pdf('map_obis-records.pdf')
+print(m)
+invisible(dev.off())
+
+# output
+m
+```
+
+## hist_mol
+
+Histogram of records using the same vertical axes as the Mollweide map for manually aligning after.
+
+```{r hist_mol, message=F}
+# project lonlat bins to mollweide for plotting marginal histogram of latitudinal density
+d = data
+d = d %>%
+  rename(lon = longitude, lat=latitude) %>%
+  filter(!is.na(lon), !is.na(lon)) %>%
+  mutate(
+    lon = ifelse(lon < -180, 360 + lon, lon),
+    x = lon,
+    y = lat)
+coordinates(d) = ~x+y
+proj4string(d) = CRS('+init=epsg:4326')
+d_mol = spTransform(
+  d,
+  CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+xy_mol = coordinates(d_mol) %>% as.data.frame()
+
+# interpolate latidude in decimal degrees to Mollweide (m)
+y_brks = approx(
+  d@data$lat, xy_mol$y,
+  #seq(-90, 90, by=10)) 
+  c(-90, -50, 0, 50, 90)) # summary(xy_mol$y); summary(d@data$lat)
+
+# plot
+h = ggplot(xy_mol, aes(x=y)) +
+  geom_histogram(aes(y = ..count../1000), bins=50) +
+  scale_x_continuous(
+    name = 'latitude',
+    breaks = y_brks$y,
+    labels = y_brks$x,
+    expand = c(0,0)) +
+  labs(x=NULL, y='records x 1000') +
+  scale_y_continuous(expand = c(0,0)) +
+  coord_flip()
+
+# save plot
+pdf('hist_obis-records.pdf')
+print(h)
+invisible(dev.off())
+
+# output
+h
+```
+
+## map_hist_mol
+
+Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: [map_hist_obis-records.pdf](map_hist_obis-records.pdf) + [hist_obis-records.pdf](hist_obis-records.pdf) -> [map_hist_obis-records.pdf](map_hist_obis-records.pdf).
+
+![](map_hist_obis-records.png)
+
+```{r old unused, eval=F, echo=F}
+# ggmap
+library(ggmap)
+omap <- get_map(
+  location = c(lon=0,lat=0), zoom=3,
+  source = 'stamen', maptype = 'toner-lite')
+ggmap(omap) +
+  stat_density2d(
+    #aes(x = longitude, y = latitude, fill = ..level.., alpha = ..level..),
+    aes(x = longitude, y = latitude),
+    size = 2, bins = 4, data = data, geom = "polygon")
+
+
+# MASS::kde2d() ----
+
+library(MASS)
+
+# Default call
+k <- with(
+  data,
+  kde2d(longitude,latitude))
+image(k, col=r)
+
+# kernel density estimation
+k <- kde2d(data$longitude, data$latitude, n=200)
+pal = colorRampPalette(rev(brewer.pal(11,'Spectral')))
+image(k, col=pal(32))
+
+
+# margins
+oldpar <- par()
+par(mar=c(3,3,1,1))
+layout(matrix(c(2,0,1,3),2,2,byrow=T),c(3,1), c(1,3))
+image(k, col=r) #plot the image
+par(mar=c(0,2,1,0))
+barplot(h1$counts, axes=F, ylim=c(0, top), space=0, col='red')
+par(mar=c(2,0,0.5,1))
+barplot(h2$counts, axes=F, xlim=c(0, top), space=0, col='red', horiz=T)
+```
