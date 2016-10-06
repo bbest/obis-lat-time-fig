@@ -7,6 +7,7 @@ output:
     toc: true
     toc_float: true
     code_folding: hide
+    self_contained: false
 ---
 
 ## load
@@ -16,21 +17,35 @@ knitr::opts_chunk$set(echo=T, cache=T)
 ```
 
 ```{r load libraries & data}
+# load libraries
 suppressPackageStartupMessages({
   require(dplyr)
   require(ggplot2)
   library(rgdal)
 })
-  
+
+# load data provided by Peter Provoost (2016-10-03)
 load("obis.dat")
+
+# filter data to valid lon/lat and depth <= 20m
+d = data %>%
+  rename(lon = longitude, lat=latitude) %>%
+  filter(
+    !is.na(lon), !is.na(lon),
+    depth <= 20) %>%
+  mutate(
+    lon = ifelse(lon < -180, 360 + lon, lon),
+    x = lon,
+    y = lat)
 ```
 
-## hist_gcs
+## hist_depth_gcs
 
-Summarize records by 5 decimal degrees and generate histogram with x-axis aligned in geographic coordinate system (gcs). 
+Summarize records by 5 decimal degrees and generate histogram with x-axis aligned in geographic coordinate system (**gcs**). 
 
-```{r summarize hist}
-d <- data %>%
+```{r hist_depth_gcs}
+# summarize data by 5 deg bins and depth
+d_sum <- data %>%
   filter(
     latitude <= 90 | latitude >= -90,
     !is.na(depth)) %>%
@@ -41,7 +56,8 @@ d <- data %>%
   summarize(
     records = n())
 
-ggplot(d, aes(x = band, y = records, fill = zone)) +
+# histogram of depth by latitude
+ggplot(d_sum, aes(x = band, y = records, fill = zone)) +
   geom_bar(stat = 'identity') +
   scale_fill_brewer(palette='YlGnBu', name='zone (m)') +
   scale_y_continuous(expand = c(0, 0)) +
@@ -49,9 +65,9 @@ ggplot(d, aes(x = band, y = records, fill = zone)) +
 ```
 
 
-## map_mol
+## map_lt20m_mol
 
-Summarize records using [`ggplot2::geom_bin2d()`](https://www.rdocumentation.org/packages/ggplot2/versions/2.1.0/topics/geom_bin2d) with `100` bins and `log10` scale to show variation and project to Mollweide (mol) for more area-realistic map. 
+Summarize records using [`ggplot2::geom_bin2d()`](https://www.rdocumentation.org/packages/ggplot2/versions/2.1.0/topics/geom_bin2d) filtered by all records less than or equal to 20 m depth (**lt20m**) with `100` bins and `log10` scale to show variation and project to Mollweide (**mol**) for more area-realistic map. 
 
 ```{r map_mol}
 n_bins = 100
@@ -59,7 +75,7 @@ world = map_data('world')
 
 m = ggplot() +
   geom_bin2d(
-    aes(x=longitude, y=latitude, fill=log10(..density..)), data = data, bins=n_bins) +
+    aes(x=lon, y=lat, fill=log10(..density..)), data = d, bins=n_bins) +
   geom_map(data=world, map=world, aes(x=long, y=lat, map_id=region), fill = 'grey70') +
   coord_map("mollweide", xlim=c(-180, 180)) +
   scale_fill_distiller(type='div', palette='Spectral', name='log10(records)') +
@@ -78,20 +94,12 @@ invisible(dev.off())
 m
 ```
 
-## hist_mol
+## hist_lt20m_mol
 
 Histogram of records using the same vertical axes as the Mollweide map for manually aligning after.
 
 ```{r hist_mol, message=F}
-# project lonlat bins to mollweide for plotting marginal histogram of latitudinal density
-d = data
-d = d %>%
-  rename(lon = longitude, lat=latitude) %>%
-  filter(!is.na(lon), !is.na(lon)) %>%
-  mutate(
-    lon = ifelse(lon < -180, 360 + lon, lon),
-    x = lon,
-    y = lat)
+# project lonlat bins to mollweide for adding histogram to margin of map
 coordinates(d) = ~x+y
 proj4string(d) = CRS('+init=epsg:4326')
 d_mol = spTransform(
@@ -102,10 +110,9 @@ xy_mol = coordinates(d_mol) %>% as.data.frame()
 # interpolate latidude in decimal degrees to Mollweide (m)
 y_brks = approx(
   d@data$lat, xy_mol$y,
-  #seq(-90, 90, by=10)) 
-  c(-90, -50, 0, 50, 90)) # summary(xy_mol$y); summary(d@data$lat)
+  c(-90, -50, 0, 50, 90))
 
-# plot
+# plot histogram of records by latitude
 h = ggplot(xy_mol, aes(x=y)) +
   geom_histogram(aes(y = ..count../1000), bins=50) +
   scale_x_continuous(
@@ -113,8 +120,10 @@ h = ggplot(xy_mol, aes(x=y)) +
     breaks = y_brks$y,
     labels = y_brks$x,
     expand = c(0,0)) +
+  scale_y_continuous(
+    limits = c(0,100),
+    expand = c(0,0)) +
   labs(x=NULL, y='records x 1000') +
-  scale_y_continuous(expand = c(0,0)) +
   coord_flip()
 
 # save plot
@@ -126,11 +135,19 @@ invisible(dev.off())
 h
 ```
 
-## map_hist_mol
+## map_hist_lt20m_mol
 
 Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: [map_hist_obis-records.pdf](map_hist_obis-records.pdf) + [hist_obis-records.pdf](hist_obis-records.pdf) -> [map_hist_obis-records.pdf](map_hist_obis-records.pdf).
 
 ![](map_hist_obis-records.png)
+
+
+## old: map_hist_mol
+
+For comparison, here's the manually combined map and histogram for all depths (ie not filtered by <= 20m): [map_hist_obis-records_alldepths.pdf](map_hist_obis-records_alldepths.pdf).
+
+![](map_hist_obis-records_alldepths.png)
+
 
 ```{r old unused, eval=F, echo=F}
 # ggmap
@@ -140,7 +157,6 @@ omap <- get_map(
   source = 'stamen', maptype = 'toner-lite')
 ggmap(omap) +
   stat_density2d(
-    #aes(x = longitude, y = latitude, fill = ..level.., alpha = ..level..),
     aes(x = longitude, y = latitude),
     size = 2, bins = 4, data = data, geom = "polygon")
 
