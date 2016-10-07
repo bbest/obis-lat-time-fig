@@ -297,6 +297,7 @@ m = ggplot() +
   geom_map(data=world, map=world, aes(x=long, y=lat, map_id=region), fill = &#39;grey70&#39;) +
   coord_map(&quot;mollweide&quot;, xlim=c(-180, 180)) +
   scale_fill_distiller(type=&#39;div&#39;, palette=&#39;Spectral&#39;, name=&#39;log10(records)&#39;) +
+  ylab(&#39;latitude&#39;) +
   theme(
     panel.background=element_blank(),
     axis.text.x=element_blank(), axis.ticks.x=element_blank(), # x ticks
