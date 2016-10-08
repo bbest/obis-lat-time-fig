@@ -1,5 +1,5 @@
 ---
-title: "OBIS Records Map & Histogram"
+title: "OBIS Records, Shallow Pelagic and Coastal"
 author: "Ben Best"
 date: "October 5, 2016"
 output:
@@ -10,135 +10,38 @@ output:
     self_contained: false
 ---
 
-## load
+## prep
 
-```{r setup, include=FALSE, echo=F}
+```{r setup knit, include=FALSE, echo=F}
 knitr::opts_chunk$set(echo=T, cache=T)
 ```
 
-```{r load libraries & data}
+- load libraries
+
+```{r load libraries}
 # load libraries
 suppressPackageStartupMessages({
-  require(dplyr)
-  require(ggplot2)
+  library(tibble)
+  library(dplyr)
+  library(ggplot2)
+  library(sp)
   library(rgdal)
   library(ncdf4)
   library(raster)
 })
+```
+
+### hist by depth
+
+Before filtering, summarize records by 5 decimal degrees at different depth bins.
+
+```{r histogram by depth}
+# files
+obis_rdata  = 'data/obis.dat'
 
 # load data provided by Peter Provoost (2016-10-03)
-load('data/obis.dat')
+load(obis_rdata)
 
-# filter data to valid lon/lat and depth <= 20m
-d = data %>%
-  rename(lon = longitude, lat=latitude) %>%
-  filter(
-    !is.na(lon), !is.na(lon),
-    !is.na(year),
-    depth <= 20) %>%
-  mutate(
-    lon = ifelse(lon < -180, 360 + lon, lon),
-    x = lon,
-    y = lat)
-
-# projections
-crs_mol = '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'
-crs_gcs = '+init=epsg:4326'
-
-# project lonlat bins to mollweide for adding histogram to margin of map
-pts_gcs = d
-coordinates(pts_gcs) = ~x+y
-proj4string(pts_gcs) = CRS(crs_gcs)
-pts_mol = spTransform(
-  pts_gcs,
-  CRS(crs_mol))
-xy_mol = coordinates(pts_mol) %>% as.data.frame()
-```
-
-## depth
-
-### GEBCO
-
-```{r gebco}
-nc = 'data/GEBCO_2014_2D.nc'
-depth = raster(nc, layer = 'elevation')
-
-system.time({
-  pts_depth_gcs = extract(
-    depth, pts_gcs, method='simple', sp=T)})
-
-
-
-
-depth_a = crop(depth, extent(-84,-83,21,22))
-f_png = 'depth_a.png'
-png(f_png)
-plot(depth_a)
-dev.off()
-system(sprintf('open %s', f_png))
-
-library(marmap) # readGEBCO.bathy
-
-depth = readGEBCO.bathy(
-  file=nc, resolution = 1)
-
-raster(file="gebco_08_-82_37_63_80",varname="z")
-
-
-summary(depth)
-# Bathymetric data of class 'bathy', with 43200 rows and 21600 columns
-# Latitudinal range: -90 to 90 (90 S to 90 N)
-# Longitudinal range: -180 to 180 (180 W to 180 E)
-# Cell size: 0.5 minute(s)
-# Depth statistics:
-#    Min. 1st Qu.  Median    Mean 3rd Qu.    Max.
-#  -10980   -4286   -2462   -1891     215    8685
-# custom col palette
-blues = colorRampPalette(c("lightblue","cadetblue1","white"))
-
-# create vectors of latitude and longitude to define the boundary of a polygon
-# cuba: c(-84.0376675, 21.5013198)
-xy <- tibble::tribble(
-  ~lon, ~lat,
-  -84, 21,
-  -84, 23,
-  -83, 23,
-  -83, 21)
-
-saveRDS(depth, 'data/depth_gebco2014.rds')
-
-
-depth = readRDS('data/depth_gebco2014.rds')
-depth_r = marmap::as.raster(depth)
-saveRDS(depth_r, 'data/depth_gebco2014_raster.rds')
-#depth_r = readRDS('data/depth_gebco2014_raster.rds')
-depth_a = raster::crop(
-  depth_r, extent(-84,-83,21,22))
-plot(depth_a)
-
-plot(xy$lon,xy$lat)
-# Use of subsetBathy to extract the new bathy object
-depth_a <- subsetBathy(
-  depth, x=c(-84,-83), y=c(21,22), locator=FALSE)
-
-
-
-plot(med, n=1, im=T, bpal=blues(100)) # bathymetry
-
-  as.numeric(rownames(sid)) -> x.sid
-  as.numeric(colnames(sid)) -> y.sid
-  contour(x.sid, y.sid, sid, drawlabels=FALSE, lwd=.1, add=TRUE) # SID
-
-
-```
-
-
-
-## hist_depth_gcs
-
-Summarize records by 5 decimal degrees and generate histogram with x-axis aligned in geographic coordinate system (**gcs**).
-
-```{r hist_depth_gcs}
 # summarize data by 5 deg bins and depth
 d_sum <- data %>%
   filter(
@@ -159,12 +62,7 @@ ggplot(d_sum, aes(x = band, y = records, fill = zone)) +
   labs(x='latitude')
 ```
 
-
-## map_lt20m_mol
-
-Summarize records using [`ggplot2::geom_bin2d()`](https://www.rdocumentation.org/packages/ggplot2/versions/2.1.0/topics/geom_bin2d) filtered by all records less than or equal to 20 m depth (**lt20m**) with `100` bins and `log10` scale to show variation and project to Mollweide (**mol**) for more area-realistic map.
-
-### get land
+### land
 
 Using [Land - 1:10m Physical Vectors | Natural Earth](http://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-land/), (3.26 MB) version 3.0.1.
 
@@ -172,10 +70,14 @@ Using [Land - 1:10m Physical Vectors | Natural Earth](http://www.naturalearthdat
 
 ![](http://www.naturalearthdata.com/wp-content/uploads/2009/09/land_banner.gif)
 
-```{r get land, eval=F}
-land_rdata = 'data/land.Rdata'
+```{r get land}
+land_rds = 'data/ne_10m_land.rds'
 
-if (!file.exists(land_rdata)){
+# projections
+crs_mol = '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'
+crs_gcs = '+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0'
+
+if (!file.exists(land_rds)){
 
   # download land from NE (Natural Earth)
   land_zip_url = 'http://www.naturalearthdata.com/http//www.naturalearthdata.com/download/10m/physical/ne_10m_land.zip'
@@ -188,81 +90,169 @@ if (!file.exists(land_rdata)){
   land     = readOGR(dsn=land_dir, layer='ne_10m_land')
 
   # project to Mollweide
-  land_mol = spTransform(land, CRS(crs_mol))
+  #land_mol = spTransform(land, CRS(crs_mol))
 
   # save
-  save(land, land_mol, file=land_rdata)
+  saveRDS(land, land_rds)
 } else {
-  load(land_rdata)
+  land = readRDS(land_rds)
 }
 ```
 
-### get land buffer
+### depth
 
-```{r land buffer, eval=F}
-library(rgeos)
+The bathymetric depth comes from the [GEBCO 30 arc-second grid](http://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_30_second_grid/) published in 2014. Here's there requested attribution:
 
-land_buf_rdata = 'data/land_buf.Rdata'
+**GEBCO_2014 Grid, version 20150318, www.gebco.net**
 
-if (!file.exists(land_buf_rdata)){
+![](http://images.vliz.be/resized/64940_general-bathymetric-chart-of-the-oceans-gebco.png)
+
+### pts
+
+For the OBIS points, extract depth of locations and whether on land.
+
+```{r prep pts, cache=F}
+# files
+depth_nc    = 'data/GEBCO_2014_2D.nc'
+obis_rdata  = 'data/obis.dat'
+pts_all_rds = 'data/pts_all.rds'
+
+if (!file.exists(pts_all_rds)){
+
+  # load data provided by Peter Provoost (2016-10-03)
+  load(obis_rdata)
+
+  # spatial points
+  pts = data %>%
+    add_rownames() %>%
+    rename(lon = longitude, lat=latitude) %>%
+    mutate(
+      lon = ifelse(lon < -180, 360 + lon, lon),
+      x = lon,
+      y = lat)
+  coordinates(pts) = ~x+y
+  proj4string(pts) = CRS(crs_gcs)
+
+  # load depth
+  depth_r = raster(depth_nc, layer = 'elevation')
+
+  # extract bottom depth (~2 min)
   system.time({
-    land_buf100km = gBuffer(land_mol, width=100000)}) # 1848.148 seconds = 30.8 minutes
-  save(land_buf100km, file=land_buf_rdata)
+    pts = raster::extract(depth_r, pts, method='bilinear', sp=T)}) # 149.559
+
+  # determine if on land ( min)
+  #   try speeding up by chunking into sorted lon & lat
+  land_parts = sp::disaggregate(land)
+  system.time({
+    t0 = Sys.time()
+    pts_land = numeric(length(pts))
+    x = round(seq(1, length(pts), length.out = 1001))
+    for (i in 1:1000){ # i=500
+      ix = x[i]:x[i+1]
+      pts_land[ix] = sp::over(pts[ix,], land_parts)$featurecla
+
+      dt = difftime(Sys.time(), t0, units='hours')
+      cat(sprintf('%04.1f%% %0.2f hrs to go\n', i/10, dt / i * (1000 - i)))
+    }
+  }) # elapsed: ~1 hr
+  pts$land = !is.na(pts_land)
+
+  # update data frame
+  pts@data = pts@data %>%
+    rename(
+      sample_depth = depth,
+      bottom_depth = Elevation.relative.to.sea.level) %>%
+    mutate(
+      bottom_depth = bottom_depth * -1,
+      bottom_zone  = cut(
+        bottom_depth, c(-Inf, -0.01, 5, Inf), labels=c('<0', '0 - 5', '>5'),
+        include.lowest=T, right=T))
+
+  # project to Mollweide, for hist matching map
+  pts_mol = spTransform(
+    pts,
+    CRS(crs_mol))
+  xy_mol = coordinates(pts_mol) %>% as.data.frame()
+  pts@data = bind_cols(
+    pts@data,
+    data.frame(
+      x_mol = xy_mol$x,
+      y_mol = xy_mol$y))
+  
+  # save to pts_all
+  saveRDS(pts, pts_all_rds)
 } else {
-  load(land_buf_rdata)
+  pts = readRDS(pts_all_rds)
 }
 ```
 
+Here's a summary of the points before filtering:
+```{r pts pre-filter}
+# show summary of values with NA's
+summary(pts) # n=4,234,200
+```
 
-### rasterize obis
+### filter pts
+
+```{r filter pts}
+# filter spatial data, using subset (not dplyr::filter)
+pts = subset(
+  pts,
+  !is.na(lon) & !is.na(lat) &                  # lon,lat
+  !is.na(year) &                               # year
+  sample_depth <= 20 & !is.na(sample_depth) &  # sample_depth
+  !land &                                      # land
+  bottom_zone %in% c('0 - 5', '>5'))           # bottom_zone
+
+```
+
+And after filtering:
+```{r pts post-filter}
+# summarize points
+summary(pts) # n=875,472
+```
+
+
+## map
+
+Summarize filtered points and project to Mollweide for more area-realistic map.
+
+### rasterize pts
+
+Get density of records by 1 degree cell by summing the field `records` from points within each cell and dividing by the cell's area.
 
 ```{r rasterize obis}
 # setup reference raster for global 1 deg cells
 r = raster(extent(-180, 180, -90, 90), ncols=360, nrows=180, crs=crs_gcs)
 
 # calculate number of records per reference 1 deg raster
-r_n = rasterize(pts_gcs, r, 'records', fun=sum) # plot(r_n)
+#  rasterize: points that fall on a border between cells are placed
+#             in the cell to the right and/or in the cell below
+r_n = rasterize(pts, r, 'records', fun=sum) # plot(r_n)
 
 # calculate area
-r_km2   = area(r)                         # plot(r_km2)
+r_km2 = area(r)                             # plot(r_km2)
 
 # calculate density: number of records per km2
-r_n_km2 = r_n / r_km2                     # plot(r_n_km2)
-
-# get max value for plotting time-series
-max_i  = which.max(r_n_km2)
-max_pt = xyFromCell(r_n_km2, max_i)
-max_v  = r_n_km2[max_i] # 90.86918
+r_n_km2 = r_n / r_km2                       # plot(r_n_km2)
 
 plot(r_n_km2)
-# other:
-#   getValues(r, row) by row
-#   extract
 ```
-The max value `r max_v` is found at `r as.character(max_pt)`.
 
 ### map mollweide
 
-```{r map_mol}
+Plot the global map in Mollweide projection.
+
+```{r map mollweide}
 n_bins = 100
 world = map_data('world')
 
-# TODO:
-# - calculate # of records per 1x1 deg cell in a raster [rasterize(pts, fun='count')]
-# - calculate area per cell [raster::area]
-# - divide to get density of pts / km^2
-# - add border around globe
+# get max value for plotting time-series
+max_i  = which.max(r_n_km2)
+max_xy = xyFromCell(r_n_km2, max_i)
+max_v  = r_n_km2[max_i] # 90.86918
 
-library(rasterVis) # gplot
-
-d=data.frame(x1=c(1,3,1,5,4), x2=c(2,4,3,6,6), y1=c(1,1,4,1,3), y2=c(2,2,5,3,5), t=c('a','a','a','b','b'), r=c(1,2,3,4,5))
-ggplot() +
-scale_x_continuous(name="x") +
-scale_y_continuous(name="y") +
-geom_rect(data=d, mapping=aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill=t), color="black", alpha=0.5)
-
-
-f_pdf = 'fig/map_obis-records_2.pdf'
+m_pdf = 'fig/map_obis-records_3.pdf'
 m = rasterVis::gplot(r_n_km2) +
   geom_rect(
     aes(xmin=x_min, xmax=x_max, ymin=y_min, ymax=y_max),
@@ -271,29 +261,11 @@ m = rasterVis::gplot(r_n_km2) +
   geom_tile(aes(fill=value), colour = NA)  +
   scale_fill_distiller(
     type='div', palette='Spectral',
-    name=expression(# / km^2), na.value='white') +
-  geom_map(data=world, map=world, aes(x=long, y=lat, map_id=region), fill = 'grey70') +
-  coord_map("mollweide", xlim=c(-180, 180)) +
-  ylab('latitude') +
-  theme(
-    panel.background=element_blank(),
-    axis.text.x=element_blank(), axis.ticks.x=element_blank(), # x ticks
-    axis.title.x=element_blank(),                              # x title
-    panel.border=element_blank(),                              # panel
-    legend.position='bottom')
-
-pdf(f_pdf)
-print(m)
-invisible(dev.off())
-system(sprintf('open %s', f_pdf))
-
-m = ggplot() +
-ggplot() +
-  #geom_bin2d(
-  #  aes(x=lon, y=lat, fill=log10(..density..)), data = d, bins=n_bins) +
-  #scale_fill_distiller(type='div', palette='Spectral', name='log10(records)') +
+    name='records / km2', na.value='white') +
   geom_map(
     data=world, map=world, aes(x=long, y=lat, map_id=region), fill = 'grey70') +
+  geom_point(
+    aes(x=x, y=y), as.data.frame(max_xy), color='red') +
   coord_map("mollweide", xlim=c(-180, 180)) +
   ylab('latitude') +
   theme(
@@ -303,97 +275,133 @@ ggplot() +
     panel.border=element_blank(),                              # panel
     legend.position='bottom')
 
-# save plot
-pdf('fig/map_obis-records.pdf')
+# print to pdf
+pdf(m_pdf)
 print(m)
 invisible(dev.off())
+system(sprintf('open %s', m_pdf))
 
 # output
 m
 ```
 
-## hist_lt20m_mol
+TODO:
+- Consider proportion of area available to coastal vs pelagic, after removing land and accounting for latitudinal variation.
+
+## hist by latitude
 
 Histogram of records using the same vertical axes as the Mollweide map for manually aligning after.
 
-```{r hist_mol, message=F}
+```{r histogram mollweide, message=F}
+#saveRDS(pts, 'data/pts_filtered.rds')
+#pts = readRDS('data/pts_filtered.rds')
+
 # interpolate latidude in decimal degrees to Mollweide (m)
-y_brks = approx(
-  d_gcs@data$lat, xy$y,
+brks = approx(
+  pts@data$lat, pts@data$y_mol,
   c(-90, -50, 0, 50, 90))
+names(brks) = c('lat','y_mol')
 
 # plot histogram of records by latitude
-h = ggplot(xy_mol, aes(x=y)) +
-  geom_histogram(aes(y = ..count../1000), bins=50) +
+h = ggplot(
+  pts@data, aes(x=y_mol, weight=records/1000, fill=bottom_zone)) +
+  geom_histogram(bins=50) +
   scale_x_continuous(
     name = 'latitude',
-    breaks = y_brks$y,
-    labels = y_brks$x,
+    breaks = brks$y_mol,
+    labels = brks$lat,
     expand = c(0,0)) +
   scale_y_continuous(
-    limits = c(0,100),
     expand = c(0,0)) +
+  scale_fill_discrete(name='depth (m)') +
   labs(x=NULL, y='records x 1000') +
+  theme(legend.justification=c(1,0), legend.position=c(1,0)) +
   coord_flip()
 
-# save plot
-pdf('fig/hist_obis-records.pdf')
+# print to pdf
+h_pdf = 'fig/hist_obis-records2.pdf'
+pdf(h_pdf, width=2, height=4)
 print(h)
 invisible(dev.off())
+system(sprintf('open %s', h_pdf))
 
 # output
 h
 ```
 
-## map_hist_lt20m_mol
+## time-series for densest cell
 
-Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: [map_hist_obis-records.pdf](fig/map_hist_obis-records.pdf) + [hist_obis-records.pdf](fig/hist_obis-records.pdf) -> [map_hist_obis-records.pdf](fig/map_hist_obis-records.pdf).
+For the 1 deg cell with the maximum OBIS record density show records by year for coastal (0-5 m) and pelagic (>5 m).
 
-![](fig/map_hist_obis-records.png)
+```{r time-series plot}
+# get records over years for cell
+d_s = pts@data %>%
+  rownames_to_column() %>%
+  filter(
+    #  rasterize: points that fall on a border between cells are placed
+    #             in the cell to the right and/or in the cell below
+    lon > max_xy[1]-0.5, lon <= max_xy[1]+0.5,
+    lat > max_xy[2]-0.5, lat <= max_xy[2]+0.5) %>%
+  group_by(year, bottom_zone) %>%
+  summarize(
+    records     = sum(records)) %>%
+  ungroup() %>%
+  mutate(
+    records_cum     = cumsum(records),
+    records_cum_pct = records_cum / sum(records)) %>%
+  filter(
+    year >= 2000)
 
+# get summaries of previous and total across bottom_zones
+records_prev = d_s %>% 
+  filter(year == 2000) %>%
+  summarize(
+    records_prev = sum(records_cum) - sum(records)) %>%
+  .$records_prev
+records_tot = d_s %>% 
+  filter(year == max(year)) %>%
+  summarize(
+    records_tot = sum(records_cum)) %>%
+  .$records_tot
 
-## old: map_hist_mol
+# plot time series
+s = ggplot(d_s, aes(x=year, weight=records/1000, fill=bottom_zone)) +
+  geom_histogram(binwidth=1) +
+  scale_y_continuous(
+    name = 'records x 1000',
+    expand = c(0.02,0)) +
+  scale_fill_discrete(name='depth (m)') +
+  theme(legend.justification=c(0,1), legend.position=c(0,1))
 
-For comparison, here's the manually combined map and histogram for all depths (ie not filtered by <= 20m): [map_hist_obis-records_alldepths.pdf](fig/map_hist_obis-records_alldepths.pdf).
+# print to pdf
+s_pdf = 'fig/timeseries_obis-records_max1deg.pdf'
+pdf(s_pdf, width=4, height=2)
+print(s)
+invisible(dev.off())
+system(sprintf('open %s', s_pdf))
 
-![](fig/map_hist_obis-records_alldepths.png)
-
-
-```{r old unused, eval=F, echo=F}
-# ggmap
-library(ggmap)
-omap <- get_map(
-  location = c(lon=0,lat=0), zoom=3,
-  source = 'stamen', maptype = 'toner-lite')
-ggmap(omap) +
-  stat_density2d(
-    aes(x = longitude, y = latitude),
-    size = 2, bins = 4, data = data, geom = "polygon")
-
-
-# MASS::kde2d() ----
-
-library(MASS)
-
-# Default call
-k <- with(
-  data,
-  kde2d(longitude,latitude))
-image(k, col=r)
-
-# kernel density estimation
-k <- kde2d(data$longitude, data$latitude, n=200)
-pal = colorRampPalette(rev(brewer.pal(11,'Spectral')))
-image(k, col=pal(32))
-
-
-# margins
-oldpar <- par()
-par(mar=c(3,3,1,1))
-layout(matrix(c(2,0,1,3),2,2,byrow=T),c(3,1), c(1,3))
-image(k, col=r) #plot the image
-par(mar=c(0,2,1,0))
-barplot(h1$counts, axes=F, ylim=c(0, top), space=0, col='red')
-par(mar=c(2,0,0.5,1))
-barplot(h2$counts, axes=F, xlim=c(0, top), space=0, col='red', horiz=T)
+# show s
+s
 ```
+
+The max value `r max_v` is found at `r as.character(max_xy)`. Although the time series for this cell started in `1903`, only `r records_prev` of `r records_tot` records were observed prior to `2000`.
+
+Here's the table of values in the time-series histogram used since 2000.
+
+```{r}
+DT::datatable(d_s)
+```
+
+## map, hist, time-series combined
+
+Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: [obis_map.pdf](fig/obis_map.pdf) + [obis_hist.pdf](fig/obis_hist.pdf) -> [obis_ts.pdf](fig/obis_ts.pdf).
+
+![](fig/obis_map_hist_ts.png)
+
+_Figure 1. Density of OBIS records per km<sup>2</sup> by 1 degree cells observed in shallow water (<20m) at coastal (0-5m) and pelagic (>5m) locations (by bathymetric depth) having a valid year and occurring in the ocean. The map and latitudinal histogram (right) highlight the lack of observations spatially, particularly in the tropics and southern hemisphere. Even for the highlighted cell (red dot in Florida, US) having the highest observational density (`r round(max_v, 1)` records/km<sup>2</sup>), the number of records varies widely across years (lower left). Remote sensing and modeling techniques promise to fill these widespread data gaps in our coastal and pelagic assessment of marine biodiversity globally._
+
+## old: map, hist for all depths
+
+For comparison, here's the combined map and histogram for all depths (ie not filtered by sample_depth <= 20m) and regardless of valid year: [obis_map_hist_all-depths.pdf](fig/obis_map_hist_all-depths.pdf).
+
+![](fig/obis_map_hist_all-depths.png)

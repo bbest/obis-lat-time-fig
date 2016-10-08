@@ -12,9 +12,9 @@
 <meta name="author" content="Ben Best" />
 
 
-<title>OBIS Records Map &amp; Histogram</title>
+<title>OBIS Records, Shallow Pelagic and Coastal</title>
 
-<script src="index_files/jquery-1.11.3/jquery.min.js"></script>
+<script src="index_files/jquery-1.12.4/jquery.min.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link href="index_files/bootstrap-3.3.5/css/bootstrap.min.css" rel="stylesheet" />
 <script src="index_files/bootstrap-3.3.5/js/bootstrap.min.js"></script>
@@ -23,6 +23,11 @@
 <script src="index_files/jqueryui-1.11.4/jquery-ui.min.js"></script>
 <link href="index_files/tocify-1.9.1/jquery.tocify.css" rel="stylesheet" />
 <script src="index_files/tocify-1.9.1/jquery.tocify.js"></script>
+<script src="index_files/htmlwidgets-0.8/htmlwidgets.js"></script>
+<script src="index_files/datatables-binding-0.2/datatables.js"></script>
+<link href="index_files/dt-core-1.10.12/css/jquery.dataTables.min.css" rel="stylesheet" />
+<link href="index_files/dt-core-1.10.12/css/jquery.dataTables.extra.css" rel="stylesheet" />
+<script src="index_files/dt-core-1.10.12/js/jquery.dataTables.min.js"></script>
 
 <style type="text/css">code{white-space: pre;}</style>
 <link rel="stylesheet"
@@ -232,40 +237,38 @@ div.tocify {
 
 
 
-<h1 class="title toc-ignore">OBIS Records Map &amp; Histogram</h1>
+<h1 class="title toc-ignore">OBIS Records, Shallow Pelagic and Coastal</h1>
 <h4 class="author"><em>Ben Best</em></h4>
 <h4 class="date"><em>October 5, 2016</em></h4>
 
 </div>
 
 
-<div id="load" class="section level2">
-<h2>load</h2>
+<div id="prep" class="section level2">
+<h2>prep</h2>
+<ul>
+<li>load libraries</li>
+</ul>
 <pre class="r"><code># load libraries
 suppressPackageStartupMessages({
-  require(dplyr)
-  require(ggplot2)
+  library(tibble)
+  library(dplyr)
+  library(ggplot2)
+  library(sp)
   library(rgdal)
-})
+  library(ncdf4)
+  library(raster)
+})</code></pre>
+<div id="hist-by-depth" class="section level3">
+<h3>hist by depth</h3>
+<p>Before filtering, summarize records by 5 decimal degrees at different depth bins.</p>
+<pre class="r"><code># files
+obis_rdata  = &#39;data/obis.dat&#39;
 
 # load data provided by Peter Provoost (2016-10-03)
-load(&quot;obis.dat&quot;)
+load(obis_rdata)
 
-# filter data to valid lon/lat and depth &lt;= 20m
-d = data %&gt;%
-  rename(lon = longitude, lat=latitude) %&gt;%
-  filter(
-    !is.na(lon), !is.na(lon),
-    depth &lt;= 20) %&gt;%
-  mutate(
-    lon = ifelse(lon &lt; -180, 360 + lon, lon),
-    x = lon,
-    y = lat)</code></pre>
-</div>
-<div id="hist_depth_gcs" class="section level2">
-<h2>hist_depth_gcs</h2>
-<p>Summarize records by 5 decimal degrees and generate histogram with x-axis aligned in geographic coordinate system (<strong>gcs</strong>).</p>
-<pre class="r"><code># summarize data by 5 deg bins and depth
+# summarize data by 5 deg bins and depth
 d_sum &lt;- data %&gt;%
   filter(
     latitude &lt;= 90 | latitude &gt;= -90,
@@ -283,88 +286,393 @@ ggplot(d_sum, aes(x = band, y = records, fill = zone)) +
   scale_fill_brewer(palette=&#39;YlGnBu&#39;, name=&#39;zone (m)&#39;) +
   scale_y_continuous(expand = c(0, 0)) +
   labs(x=&#39;latitude&#39;)</code></pre>
-<p><img src="index_files/figure-html/hist_depth_gcs-1.png" width="672" /></p>
+<p><img src="index_files/figure-html/histogram%20by%20depth-1.png" width="672" /></p>
 </div>
-<div id="map_lt20m_mol" class="section level2">
-<h2>map_lt20m_mol</h2>
-<p>Summarize records using <a href="https://www.rdocumentation.org/packages/ggplot2/versions/2.1.0/topics/geom_bin2d"><code>ggplot2::geom_bin2d()</code></a> filtered by all records less than or equal to 20 m depth (<strong>lt20m</strong>) with <code>100</code> bins and <code>log10</code> scale to show variation and project to Mollweide (<strong>mol</strong>) for more area-realistic map.</p>
+<div id="land" class="section level3">
+<h3>land</h3>
+<p>Using <a href="http://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-land/">Land - 1:10m Physical Vectors | Natural Earth</a>, (3.26 MB) version 3.0.1.</p>
+<blockquote>
+<p>Derived from 10m coastline. Continental polygons broken into smaller, contiguous pieces to avoid having too many points in any one polygon, facilitating faster data processing in certain software applications. <em>(below) Yucatan peninsula, Cuba, and Hispaniola.</em></p>
+</blockquote>
+<div class="figure">
+<img src="http://www.naturalearthdata.com/wp-content/uploads/2009/09/land_banner.gif" />
+
+</div>
+<pre class="r"><code>land_rds = &#39;data/ne_10m_land.rds&#39;
+
+# projections
+crs_mol = &#39;+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs&#39;
+crs_gcs = &#39;+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0&#39;
+
+if (!file.exists(land_rds)){
+
+  # download land from NE (Natural Earth)
+  land_zip_url = &#39;http://www.naturalearthdata.com/http//www.naturalearthdata.com/download/10m/physical/ne_10m_land.zip&#39;
+  land_zip = tempfile(fileext=&#39;.zip&#39;)
+  land_dir = tempdir()
+  download.file(land_zip_url, land_zip)
+  unzip(land_zip, exdir=land_dir)
+
+  # read in as SpatialPolygonsDataFrame
+  land     = readOGR(dsn=land_dir, layer=&#39;ne_10m_land&#39;)
+
+  # project to Mollweide
+  #land_mol = spTransform(land, CRS(crs_mol))
+
+  # save
+  saveRDS(land, land_rds)
+} else {
+  land = readRDS(land_rds)
+}</code></pre>
+</div>
+<div id="depth" class="section level3">
+<h3>depth</h3>
+<p>The bathymetric depth comes from the <a href="http://www.gebco.net/data_and_products/gridded_bathymetry_data/gebco_30_second_grid/">GEBCO 30 arc-second grid</a> published in 2014. Here’s there requested attribution:</p>
+<p><strong>GEBCO_2014 Grid, version 20150318, www.gebco.net</strong></p>
+<div class="figure">
+<img src="http://images.vliz.be/resized/64940_general-bathymetric-chart-of-the-oceans-gebco.png" />
+
+</div>
+</div>
+<div id="pts" class="section level3">
+<h3>pts</h3>
+<p>For the OBIS points, extract depth of locations and whether on land.</p>
+<pre class="r"><code># files
+depth_nc    = &#39;data/GEBCO_2014_2D.nc&#39;
+obis_rdata  = &#39;data/obis.dat&#39;
+pts_all_rds = &#39;data/pts_all.rds&#39;
+
+if (!file.exists(pts_all_rds)){
+
+  # load data provided by Peter Provoost (2016-10-03)
+  load(obis_rdata)
+
+  # spatial points
+  pts = data %&gt;%
+    add_rownames() %&gt;%
+    rename(lon = longitude, lat=latitude) %&gt;%
+    mutate(
+      lon = ifelse(lon &lt; -180, 360 + lon, lon),
+      x = lon,
+      y = lat)
+  coordinates(pts) = ~x+y
+  proj4string(pts) = CRS(crs_gcs)
+
+  # load depth
+  depth_r = raster(depth_nc, layer = &#39;elevation&#39;)
+
+  # extract bottom depth (~2 min)
+  system.time({
+    pts = raster::extract(depth_r, pts, method=&#39;bilinear&#39;, sp=T)}) # 149.559
+
+  # determine if on land ( min)
+  #   try speeding up by chunking into sorted lon &amp; lat
+  land_parts = sp::disaggregate(land)
+  system.time({
+    t0 = Sys.time()
+    pts_land = numeric(length(pts))
+    x = round(seq(1, length(pts), length.out = 1001))
+    for (i in 1:1000){ # i=500
+      ix = x[i]:x[i+1]
+      pts_land[ix] = sp::over(pts[ix,], land_parts)$featurecla
+
+      dt = difftime(Sys.time(), t0, units=&#39;hours&#39;)
+      cat(sprintf(&#39;%04.1f%% %0.2f hrs to go\n&#39;, i/10, dt / i * (1000 - i)))
+    }
+  }) # elapsed: ~1 hr
+  pts$land = !is.na(pts_land)
+
+  # update data frame
+  pts@data = pts@data %&gt;%
+    rename(
+      sample_depth = depth,
+      bottom_depth = Elevation.relative.to.sea.level) %&gt;%
+    mutate(
+      bottom_depth = bottom_depth * -1,
+      bottom_zone  = cut(
+        bottom_depth, c(-Inf, -0.01, 5, Inf), labels=c(&#39;&lt;0&#39;, &#39;0 - 5&#39;, &#39;&gt;5&#39;),
+        include.lowest=T, right=T))
+
+  # project to Mollweide, for hist matching map
+  pts_mol = spTransform(
+    pts,
+    CRS(crs_mol))
+  xy_mol = coordinates(pts_mol) %&gt;% as.data.frame()
+  pts@data = bind_cols(
+    pts@data,
+    data.frame(
+      x_mol = xy_mol$x,
+      y_mol = xy_mol$y))
+  
+  # save to pts_all
+  saveRDS(pts, pts_all_rds)
+} else {
+  pts = readRDS(pts_all_rds)
+}</code></pre>
+<p>Here’s a summary of the points before filtering:</p>
+<pre class="r"><code># show summary of values with NA&#39;s
+summary(pts) # n=4,234,200</code></pre>
+<pre><code>## Object of class SpatialPointsDataFrame
+## Coordinates:
+##    min max
+## x -180 180
+## y  -90  90
+## Is projected: FALSE 
+## proj4string :
+## [+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0]
+## Number of points: 4234200
+## Data attributes:
+##       lon               lat          sample_depth           year       
+##  Min.   :-180.00   Min.   :-90.00   Min.   : -9999.0   Min.   :1520    
+##  1st Qu.: -89.55   1st Qu.: -8.99   1st Qu.:     7.5   1st Qu.:1984    
+##  Median : -55.70   Median : 38.50   Median :    30.0   Median :1996    
+##  Mean   : -29.41   Mean   : 20.03   Mean   :   192.7   Mean   :1991    
+##  3rd Qu.:  10.30   3rd Qu.: 48.62   3rd Qu.:   123.0   3rd Qu.:2003    
+##  Max.   : 180.00   Max.   : 90.00   Max.   :623624.0   Max.   :2016    
+##                                     NA&#39;s   :2243109    NA&#39;s   :268362  
+##     records          bottom_depth         land         bottom_zone    
+##  Min.   :    1.00   Min.   :-5668.40   Mode :logical   &lt;0   : 593037  
+##  1st Qu.:    1.00   1st Qu.:   17.88   FALSE:3806354   0 - 5: 227559  
+##  Median :    2.00   Median :  119.50   TRUE :427846    &gt;5   :3413142  
+##  Mean   :   11.12   Mean   :  918.27   NA&#39;s :0         NA&#39;s :    462  
+##  3rd Qu.:    7.00   3rd Qu.: 1210.75                                  
+##  Max.   :33764.00   Max.   :10887.49                                  
+##                     NA&#39;s   :462                                       
+##      x_mol               y_mol           right        
+##  Min.   :-18035560   Min.   :-9020048   Mode:logical  
+##  1st Qu.: -8134156   1st Qu.:-1109819   TRUE:4234200  
+##  Median : -3964421   Median : 4621056   NA&#39;s:0        
+##  Mean   : -2462753   Mean   : 2374513                 
+##  3rd Qu.:   708197   3rd Qu.: 5728304                 
+##  Max.   : 18040096   Max.   : 9020048                 
+## </code></pre>
+</div>
+<div id="filter-pts" class="section level3">
+<h3>filter pts</h3>
+<pre class="r"><code># filter spatial data, using subset (not dplyr::filter)
+pts = subset(
+  pts,
+  !is.na(lon) &amp; !is.na(lat) &amp;                  # lon,lat
+  !is.na(year) &amp;                               # year
+  sample_depth &lt;= 20 &amp; !is.na(sample_depth) &amp;  # sample_depth
+  !land &amp;                                      # land
+  bottom_zone %in% c(&#39;0 - 5&#39;, &#39;&gt;5&#39;))           # bottom_zone</code></pre>
+<p>And after filtering:</p>
+<pre class="r"><code># summarize points
+summary(pts) # n=875,472</code></pre>
+<pre><code>## Object of class SpatialPointsDataFrame
+## Coordinates:
+##         min      max
+## x -180.0000 179.9998
+## y  -78.0498  90.0000
+## Is projected: FALSE 
+## proj4string :
+## [+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0]
+## Number of points: 761731
+## Data attributes:
+##       lon                lat          sample_depth         year     
+##  Min.   :-180.000   Min.   :-78.05   Min.   :-999.9   Min.   :1754  
+##  1st Qu.: -70.150   1st Qu.:-34.92   1st Qu.:   0.0   1st Qu.:1982  
+##  Median :  -9.458   Median : 38.91   Median :   7.5   Median :1997  
+##  Mean   :  -7.503   Mean   : 16.10   Mean   :   5.9   Mean   :1990  
+##  3rd Qu.:  33.510   3rd Qu.: 53.15   3rd Qu.:   7.5   3rd Qu.:2002  
+##  Max.   : 180.000   Max.   : 90.00   Max.   :  20.0   Max.   :2014  
+##     records         bottom_depth         land         bottom_zone   
+##  Min.   :   1.00   Min.   :  -0.008   Mode :logical   &lt;0   :     0  
+##  1st Qu.:   2.00   1st Qu.:  26.000   FALSE:761731    0 - 5: 86862  
+##  Median :   6.00   Median : 175.934   NA&#39;s :0         &gt;5   :674869  
+##  Mean   :  14.29   Mean   :1138.200                                 
+##  3rd Qu.:  14.00   3rd Qu.:2084.878                                 
+##  Max.   :5735.00   Max.   :9329.469                                 
+##      x_mol               y_mol           right        
+##  Min.   :-17976910   Min.   :-8394926   Mode:logical  
+##  1st Qu.: -5663888   1st Qu.:-4213669   TRUE:761731   
+##  Median :  -708287   Median : 4667203   NA&#39;s:0        
+##  Mean   : -1001721   Mean   : 1928800                 
+##  3rd Qu.:  2466263   3rd Qu.: 6199229                 
+##  Max.   : 18039794   Max.   : 9020048</code></pre>
+</div>
+</div>
+<div id="map" class="section level2">
+<h2>map</h2>
+<p>Summarize filtered points and project to Mollweide for more area-realistic map.</p>
+<div id="rasterize-pts" class="section level3">
+<h3>rasterize pts</h3>
+<p>Get density of records by 1 degree cell by summing the field <code>records</code> from points within each cell and dividing by the cell’s area.</p>
+<pre class="r"><code># setup reference raster for global 1 deg cells
+r = raster(extent(-180, 180, -90, 90), ncols=360, nrows=180, crs=crs_gcs)
+
+# calculate number of records per reference 1 deg raster
+#  rasterize: points that fall on a border between cells are placed
+#             in the cell to the right and/or in the cell below
+r_n = rasterize(pts, r, &#39;records&#39;, fun=sum) # plot(r_n)
+
+# calculate area
+r_km2 = area(r)                             # plot(r_km2)
+
+# calculate density: number of records per km2
+r_n_km2 = r_n / r_km2                       # plot(r_n_km2)
+
+plot(r_n_km2)</code></pre>
+<p><img src="index_files/figure-html/rasterize%20obis-1.png" width="672" /></p>
+</div>
+<div id="map-mollweide" class="section level3">
+<h3>map mollweide</h3>
+<p>Plot the global map in Mollweide projection.</p>
 <pre class="r"><code>n_bins = 100
 world = map_data(&#39;world&#39;)
 
-m = ggplot() +
-  geom_bin2d(
-    aes(x=lon, y=lat, fill=log10(..density..)), data = d, bins=n_bins) +
-  geom_map(data=world, map=world, aes(x=long, y=lat, map_id=region), fill = &#39;grey70&#39;) +
+# get max value for plotting time-series
+max_i  = which.max(r_n_km2)
+max_xy = xyFromCell(r_n_km2, max_i)
+max_v  = r_n_km2[max_i] # 90.86918
+
+m_pdf = &#39;fig/map_obis-records_3.pdf&#39;
+m = rasterVis::gplot(r_n_km2) +
+  geom_rect(
+    aes(xmin=x_min, xmax=x_max, ymin=y_min, ymax=y_max),
+    data=data.frame(x_min=-180, x_max=180, y_min=-90, y_max=90),
+    colour=&#39;black&#39;, fill=&#39;white&#39;, size=0.3, inherit.aes=F) +
+  geom_tile(aes(fill=value), colour = NA)  +
+  scale_fill_distiller(
+    type=&#39;div&#39;, palette=&#39;Spectral&#39;,
+    name=&#39;records / km2&#39;, na.value=&#39;white&#39;) +
+  geom_map(
+    data=world, map=world, aes(x=long, y=lat, map_id=region), fill = &#39;grey70&#39;) +
+  geom_point(
+    aes(x=x, y=y), as.data.frame(max_xy), color=&#39;red&#39;) +
   coord_map(&quot;mollweide&quot;, xlim=c(-180, 180)) +
-  scale_fill_distiller(type=&#39;div&#39;, palette=&#39;Spectral&#39;, name=&#39;log10(records)&#39;) +
   ylab(&#39;latitude&#39;) +
   theme(
     panel.background=element_blank(),
     axis.text.x=element_blank(), axis.ticks.x=element_blank(), # x ticks
     axis.title.x=element_blank(),                              # x title
+    panel.border=element_blank(),                              # panel
     legend.position=&#39;bottom&#39;)
 
-# save plot
-pdf(&#39;map_obis-records.pdf&#39;)
+# print to pdf
+pdf(m_pdf)
 print(m)
 invisible(dev.off())
+system(sprintf(&#39;open %s&#39;, m_pdf))
 
 # output
 m</code></pre>
-<p><img src="index_files/figure-html/map_mol-1.png" width="672" /></p>
+<p><img src="index_files/figure-html/map%20mollweide-1.png" width="672" /></p>
+<p>TODO: - Consider proportion of area available to coastal vs pelagic, after removing land and accounting for latitudinal variation.</p>
 </div>
-<div id="hist_lt20m_mol" class="section level2">
-<h2>hist_lt20m_mol</h2>
+</div>
+<div id="hist-by-latitude" class="section level2">
+<h2>hist by latitude</h2>
 <p>Histogram of records using the same vertical axes as the Mollweide map for manually aligning after.</p>
-<pre class="r"><code># project lonlat bins to mollweide for adding histogram to margin of map
-coordinates(d) = ~x+y
-proj4string(d) = CRS(&#39;+init=epsg:4326&#39;)
-d_mol = spTransform(
-  d,
-  CRS(&quot;+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs&quot;))
-xy_mol = coordinates(d_mol) %&gt;% as.data.frame()
+<pre class="r"><code>#saveRDS(pts, &#39;data/pts_filtered.rds&#39;)
+#pts = readRDS(&#39;data/pts_filtered.rds&#39;)
 
 # interpolate latidude in decimal degrees to Mollweide (m)
-y_brks = approx(
-  d@data$lat, xy_mol$y,
+brks = approx(
+  pts@data$lat, pts@data$y_mol,
   c(-90, -50, 0, 50, 90))
+names(brks) = c(&#39;lat&#39;,&#39;y_mol&#39;)
 
 # plot histogram of records by latitude
-h = ggplot(xy_mol, aes(x=y)) +
-  geom_histogram(aes(y = ..count../1000), bins=50) +
+h = ggplot(
+  pts@data, aes(x=y_mol, weight=records/1000, fill=bottom_zone)) +
+  geom_histogram(bins=50) +
   scale_x_continuous(
     name = &#39;latitude&#39;,
-    breaks = y_brks$y,
-    labels = y_brks$x,
+    breaks = brks$y_mol,
+    labels = brks$lat,
     expand = c(0,0)) +
   scale_y_continuous(
-    limits = c(0,100),
     expand = c(0,0)) +
+  scale_fill_discrete(name=&#39;depth (m)&#39;) +
   labs(x=NULL, y=&#39;records x 1000&#39;) +
+  theme(legend.justification=c(1,0), legend.position=c(1,0)) +
   coord_flip()
 
-# save plot
-pdf(&#39;hist_obis-records.pdf&#39;)
+# print to pdf
+h_pdf = &#39;fig/hist_obis-records2.pdf&#39;
+pdf(h_pdf, width=2, height=4)
 print(h)
 invisible(dev.off())
+system(sprintf(&#39;open %s&#39;, h_pdf))
 
 # output
 h</code></pre>
-<p><img src="index_files/figure-html/hist_mol-1.png" width="672" /></p>
+<p><img src="index_files/figure-html/histogram%20mollweide-1.png" width="672" /></p>
 </div>
-<div id="map_hist_lt20m_mol" class="section level2">
-<h2>map_hist_lt20m_mol</h2>
-<p>Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: <a href="map_hist_obis-records.pdf" class="uri">map_hist_obis-records.pdf</a> + <a href="hist_obis-records.pdf" class="uri">hist_obis-records.pdf</a> -&gt; <a href="map_hist_obis-records.pdf" class="uri">map_hist_obis-records.pdf</a>.</p>
+<div id="time-series-for-densest-cell" class="section level2">
+<h2>time-series for densest cell</h2>
+<p>For the 1 deg cell with the maximum OBIS record density show records by year for coastal (0-5 m) and pelagic (&gt;5 m).</p>
+<pre class="r"><code># get records over years for cell
+d_s = pts@data %&gt;%
+  rownames_to_column() %&gt;%
+  filter(
+    #  rasterize: points that fall on a border between cells are placed
+    #             in the cell to the right and/or in the cell below
+    lon &gt; max_xy[1]-0.5, lon &lt;= max_xy[1]+0.5,
+    lat &gt; max_xy[2]-0.5, lat &lt;= max_xy[2]+0.5) %&gt;%
+  group_by(year, bottom_zone) %&gt;%
+  summarize(
+    records     = sum(records)) %&gt;%
+  ungroup() %&gt;%
+  mutate(
+    records_cum     = cumsum(records),
+    records_cum_pct = records_cum / sum(records)) %&gt;%
+  filter(
+    year &gt;= 2000)
+
+# get summaries of previous and total across bottom_zones
+records_prev = d_s %&gt;% 
+  filter(year == 2000) %&gt;%
+  summarize(
+    records_prev = sum(records_cum) - sum(records)) %&gt;%
+  .$records_prev
+records_tot = d_s %&gt;% 
+  filter(year == max(year)) %&gt;%
+  summarize(
+    records_tot = sum(records_cum)) %&gt;%
+  .$records_tot
+
+# plot time series
+s = ggplot(d_s, aes(x=year, weight=records/1000, fill=bottom_zone)) +
+  geom_histogram(binwidth=1) +
+  scale_y_continuous(
+    name = &#39;records x 1000&#39;,
+    expand = c(0.02,0)) +
+  scale_fill_discrete(name=&#39;depth (m)&#39;) +
+  theme(legend.justification=c(0,1), legend.position=c(0,1))
+
+# print to pdf
+s_pdf = &#39;fig/timeseries_obis-records_max1deg.pdf&#39;
+pdf(s_pdf, width=4, height=2)
+print(s)
+invisible(dev.off())
+system(sprintf(&#39;open %s&#39;, s_pdf))
+
+# show s
+s</code></pre>
+<p><img src="index_files/figure-html/time-series%20plot-1.png" width="672" /></p>
+<p>The max value 70.3804142 is found at -80.5, 25.5. Although the time series for this cell started in <code>1903</code>, only 1236 of 1565733 records were observed prior to <code>2000</code>.</p>
+<p>Here’s the table of values in the time-series histogram used since 2000.</p>
+<pre class="r"><code>DT::datatable(d_s)</code></pre>
+<div id="htmlwidget-ea569c4c8d242bc48949" style="width:100%;height:auto;" class="datatables html-widget"></div>
+<script type="application/json" data-for="htmlwidget-ea569c4c8d242bc48949">{"x":{"filter":"none","data":[["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27"],[2000,2000,2001,2001,2002,2003,2003,2004,2005,2005,2006,2006,2007,2007,2008,2008,2009,2009,2010,2010,2011,2011,2012,2012,2013,2014,2014],["0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","0 - 5","&gt;5","0 - 5","0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","&gt;5","0 - 5","&gt;5","&gt;5","0 - 5","&gt;5"],[88,120,267,30,162,1021,1505,221,88256,528,94787,1101,141476,1449,107288,920,110801,1061,117524,1304,110509,1726,5,12,46,79,13],[662,782,1049,1079,1241,2262,3767,3988,92244,92772,187559,188660,330136,331585,438873,439793,550594,551655,669179,670483,780992,782718,782723,782735,782781,782860,782873],[0.000845603309859965,0.000998884876601952,0.00133993636260287,0.00137825675428837,0.00158518686939005,0.00288935753308646,0.00481176384930889,0.00509405740139205,0.117827540354566,0.118501979248231,0.239577811471337,0.240984169846195,0.42169802764944,0.423548902567849,0.560592842006302,0.561768000684658,0.703299257989482,0.704654522508759,0.854773379590304,0.856439039282234,0.997597311441319,0.999802011309625,0.999808398041573,0.999823726198247,0.999882484132165,0.999983394496936,1]],"container":"<table class=\"display\">\n  <thead>\n    <tr>\n      <th> \u003c/th>\n      <th>year\u003c/th>\n      <th>bottom_zone\u003c/th>\n      <th>records\u003c/th>\n      <th>records_cum\u003c/th>\n      <th>records_cum_pct\u003c/th>\n    \u003c/tr>\n  \u003c/thead>\n\u003c/table>","options":{"columnDefs":[{"className":"dt-right","targets":[1,3,4,5]},{"orderable":false,"targets":0}],"order":[],"autoWidth":false,"orderClasses":false}},"evals":[],"jsHooks":[]}</script>
+</div>
+<div id="map-hist-time-series-combined" class="section level2">
+<h2>map, hist, time-series combined</h2>
+<p>Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: <a href="fig/obis_map.pdf">obis_map.pdf</a> + <a href="fig/obis_hist.pdf">obis_hist.pdf</a> -&gt; <a href="fig/obis_ts.pdf">obis_ts.pdf</a>.</p>
 <div class="figure">
-<img src="map_hist_obis-records.png" />
+<img src="fig/obis_map_hist_ts.png" />
 
 </div>
+<p><em>Figure 1. Density of OBIS records per km<sup>2</sup> by 1 degree cells observed in shallow water (&lt;20m) at coastal (0-5m) and pelagic (&gt;5m) locations (by bathymetric depth) having a valid year and occurring in the ocean. The map and latitudinal histogram (right) highlight the lack of observations spatially, particularly in the tropics and southern hemisphere. Even for the highlighted cell (red dot in Florida, US) having the highest observational density (70.4 records/km<sup>2</sup>), the number of records varies widely across years (lower left). Remote sensing and modeling techniques promise to fill these widespread data gaps in our coastal and pelagic assessment of marine biodiversity globally.</em></p>
 </div>
-<div id="old-map_hist_mol" class="section level2">
-<h2>old: map_hist_mol</h2>
-<p>For comparison, here’s the manually combined map and histogram for all depths (ie not filtered by &lt;= 20m): <a href="map_hist_obis-records_alldepths.pdf" class="uri">map_hist_obis-records_alldepths.pdf</a>.</p>
+<div id="old-map-hist-for-all-depths" class="section level2">
+<h2>old: map, hist for all depths</h2>
+<p>For comparison, here’s the combined map and histogram for all depths (ie not filtered by sample_depth &lt;= 20m) and regardless of valid year: <a href="fig/obis_map_hist_all-depths.pdf">obis_map_hist_all-depths.pdf</a>.</p>
 <div class="figure">
-<img src="map_hist_obis-records_alldepths.png" />
+<img src="fig/obis_map_hist_all-depths.png" />
 
 </div>
 </div>

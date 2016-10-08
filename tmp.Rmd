@@ -1,0 +1,13 @@
+---
+title: "tmp"
+author: "Ben Best"
+date: "October 7, 2016"
+output: html_document
+---
+
+```{r}
+max_v = 70.38041
+```
+
+
+_Figure 1. Density of OBIS records per km<sup>2</sup> by 1 degree cells observed in shallow water (<20m) at coastal (0-5m) and pelagic (>5m) locations (by bathymetric depth) having a valid year and occuring in the ocean. The map and latitudinal histogram highlight the lack of observations spatially, particularly in the tropics and southern hemisphere. Even for the highlighed cell (red dot in Florida US) having the highest observational density (`r round(max_v, 1)` records/km<sup>2</sup>), the number of records varies widely across years. Remote sensing and modeling techniques promise to fill these widespread data gaps in our coastal and pelagic assessment of marine biodiversity globally._
