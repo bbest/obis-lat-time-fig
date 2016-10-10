@@ -1,5 +1,5 @@
 ---
-title: "OBIS Records, Shallow Pelagic and Coastal"
+title: "OBIS records: shallow observations in pelagic and coastal zones"
 author: "Ben Best"
 date: "`r format(Sys.time(), '%Y-%m-%d')`"
 output:
@@ -244,7 +244,6 @@ plot(r_n_km2)
 Plot the global map in Mollweide projection.
 
 ```{r map mollweide}
-n_bins = 100
 world = map_data('world')
 
 # get max value for plotting time-series
@@ -252,16 +251,16 @@ max_i  = which.max(r_n_km2)
 max_xy = xyFromCell(r_n_km2, max_i)
 max_v  = r_n_km2[max_i] # 90.86918
 
-m_pdf = 'fig/map_obis-records_3.pdf'
+m_pdf = 'fig/obis_map.pdf'
 m = rasterVis::gplot(r_n_km2) +
   geom_rect(
     aes(xmin=x_min, xmax=x_max, ymin=y_min, ymax=y_max),
     data=data.frame(x_min=-180, x_max=180, y_min=-90, y_max=90),
     colour='black', fill='white', size=0.3, inherit.aes=F) +
-  geom_tile(aes(fill=value), colour = NA)  +
+  geom_tile(aes(fill=log10(value))) + # , colour = NA
   scale_fill_distiller(
     type='div', palette='Spectral',
-    name='records / km2', na.value='white') +
+    name='log10(records / km2)', na.value='white') +
   geom_map(
     data=world, map=world, aes(x=long, y=lat, map_id=region), fill = 'grey70') +
   geom_point(
@@ -319,7 +318,7 @@ h = ggplot(
   coord_flip()
 
 # print to pdf
-h_pdf = 'fig/hist_obis-records2.pdf'
+h_pdf = 'fig/obis_hist.pdf'
 pdf(h_pdf, width=2, height=4)
 print(h)
 invisible(dev.off())
@@ -374,7 +373,7 @@ s = ggplot(d_s, aes(x=year, weight=records/1000, fill=bottom_zone)) +
   theme(legend.justification=c(0,1), legend.position=c(0,1))
 
 # print to pdf
-s_pdf = 'fig/timeseries_obis-records_max1deg.pdf'
+s_pdf = 'fig/obis_ts.pdf'
 pdf(s_pdf, width=4, height=2)
 print(s)
 invisible(dev.off())
@@ -397,8 +396,7 @@ DT::datatable(d_s)
 Manually combined the map and histogram in Adobe Illustrator from the pdf outputs: [obis_map.pdf](fig/obis_map.pdf) + [obis_hist.pdf](fig/obis_hist.pdf) -> [obis_ts.pdf](fig/obis_ts.pdf).
 
 ![](fig/obis_map_hist_ts.png)
-
-_Figure 1. Density of OBIS records per km<sup>2</sup> by 1 degree cells observed in shallow water (<20m) at coastal (0-5m) and pelagic (>5m) locations (by bathymetric depth) having a valid year and occurring in the ocean. The map and latitudinal histogram (right) highlight the lack of observations spatially, particularly in the tropics and southern hemisphere. Even for the highlighted cell (red dot in Florida, US) having the highest observational density (`r round(max_v, 1)` records/km<sup>2</sup>), the number of records varies widely across years (lower left). Remote sensing and modeling techniques promise to fill these widespread data gaps in our coastal and pelagic assessment of marine biodiversity globally._
+_Figure 1. Density of OBIS records per km<sup>2</sup> by 1 degree cells on log10 scale observed in shallow water (<20m) at coastal (0-5m) and pelagic (>5m) locations (by bathymetric depth) having a valid year and occurring in the ocean. The map and latitudinal histogram (right) highlight the lack of observations spatially, particularly in the tropics and southern hemisphere. Even for the highlighted cell (red dot in Florida, US) having the highest observational density (`r round(max_v, 1)` records/km<sup>2</sup>), the number of records varies widely across years (lower left). Routine satellite remote sensing combined with modeling promise to fill these widespread data gaps in space and time for assessment of marine biodiversity in the coastal and pelagic zones globally._
 
 ## old: map, hist for all depths
 
