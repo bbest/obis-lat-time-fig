@@ -301,22 +301,51 @@ brks = approx(
   c(-90, -50, 0, 50, 90))
 names(brks) = c('lat','y_mol')
 
+# require(scales)
+# mylog_trans <- function (base = exp(1), from = 0){
+#   trans <- function(x) log(x, base) - from
+#   inv <- function(x) base^(x + from)
+#   trans_new("mylog", trans, inv, log_breaks(base = base), domain = c(base^from, Inf))
+# }
+
 # plot histogram of records by latitude
-h = ggplot(
-  pts@data, aes(x=y_mol, weight=records/1000, fill=bottom_zone)) +
-  geom_histogram(bins=50) +
+h = 
+  ggplot(
+  pts@data, aes(x=y_mol,weight=records/1000, fill=bottom_zone)) +
+  geom_histogram(bins=50, pad=T) +
   scale_x_continuous(
     name = 'latitude',
     breaks = brks$y_mol,
     labels = brks$lat,
     expand = c(0,0)) +
   scale_y_continuous(
-    expand = c(0,0)) +
+    expand = c(0,0)) + # + scale_x_log10() 
+  #scale_y_continuous(trans = mylog_trans(base=10, from=-3), limits=c(0.001,100000))
   scale_fill_discrete(name='depth (m)') +
   labs(x=NULL, y='records x 1000') +
-  theme(legend.justification=c(1,0), legend.position=c(1,0)) +
+  theme(legend.justification=c(1,0), legend.position=c(1,0)) + 
   coord_flip()
 
+# bin records into 5 deg latitudinal bands
+lat_bands = seq(-90, 90, by=5)
+h_d = pts@data %>%
+  mutate(
+    lat_band = cut(lat, lat_bands, include.lowest=T, right=T)) %>%
+  group_by(lat_band, bottom_zone) %>%
+  summarize(
+    records = sum(records))
+
+ggplot(aes(x=lat_band, weight=records, fill=bottom_zone), data=h_d) +
+  geom_bar(position="dodge") +
+  scale_y_log10(expand=c(0,0.2)) + 
+  coord_flip()
+
+
+
+ggplot(
+  pts@data, aes(x=y_mol, y=records/1000, fill=bottom_zone)
+  DF, aes(x=clarity, y=n, fill=cut)) +
+  
 # print to pdf
 h_pdf = 'fig/obis_hist.pdf'
 pdf(h_pdf, width=2, height=4)
