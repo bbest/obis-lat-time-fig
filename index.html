@@ -11,7 +11,7 @@
 
 <meta name="author" content="Ben Best" />
 
-<meta name="date" content="2016-10-10" />
+<meta name="date" content="2016-10-14" />
 
 <title>OBIS records: shallow observations in pelagic and coastal zones</title>
 
@@ -240,7 +240,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">OBIS records: shallow observations in pelagic and coastal zones</h1>
 <h4 class="author"><em>Ben Best</em></h4>
-<h4 class="date"><em>2016-10-10</em></h4>
+<h4 class="date"><em>2016-10-14</em></h4>
 
 </div>
 
@@ -252,13 +252,15 @@ div.tocify {
 </ul>
 <pre class="r"><code># load libraries
 suppressPackageStartupMessages({
+  library(raster)
   library(tibble)
   library(dplyr)
+  library(tidyr)
   library(ggplot2)
   library(sp)
   library(rgdal)
   library(ncdf4)
-  library(raster)
+  library(scales)
 })</code></pre>
 <div id="hist-by-depth" class="section level3">
 <h3>hist by depth</h3>
@@ -565,34 +567,68 @@ m</code></pre>
 <div id="hist-by-latitude" class="section level2">
 <h2>hist by latitude</h2>
 <p>Histogram of records using the same vertical axes as the Mollweide map for manually aligning after.</p>
-<pre class="r"><code>#saveRDS(pts, &#39;data/pts_filtered.rds&#39;)
-#pts = readRDS(&#39;data/pts_filtered.rds&#39;)
+<pre class="r"><code># bin records into 10 deg latitudinal bands
+lats = seq(-85, 85, by=10)
+h_d = data_frame(
+  lat_band     = rep(lats, each=2),
+  bottom_zone  = rep(c(&#39;0 - 5&#39;,&#39;&gt;5&#39;), length(lats))) %&gt;%
+  left_join(
+    pts@data %&gt;%
+    mutate(
+      lat_band = cut(lat, seq(-90, 90, by=10), labels = lats, include.lowest=T, right=T)) %&gt;%
+    group_by(lat_band, bottom_zone) %&gt;%
+    summarize(
+      records = sum(records)) %&gt;%
+    ungroup() %&gt;%
+    mutate(
+      lat_band    = as.numeric(as.character(lat_band)),
+      bottom_zone = as.character(bottom_zone)) %&gt;%
+    filter(bottom_zone %in% c(&#39;0 - 5&#39;,&#39;&gt;5&#39;)),
+    by=c(&#39;lat_band&#39;,&#39;bottom_zone&#39;)) %&gt;%
+  mutate(
+    records = ifelse(is.na(records), 0, records))
+    
+# get mollweide latitudinal coordinates
+p = data_frame(lat = c(-90,90,seq(-90, 90, by=10),lats), lon = 0)
+coordinates(p) = ~lon+lat
+proj4string(p) = CRS(crs_gcs)            
+m = spTransform(p, CRS(crs_mol))
+h_d = h_d %&gt;%
+  left_join(
+    data_frame(
+      lat_band = p$lat, 
+      y_mol    = coordinates(m)[,2]),
+    by = &#39;lat_band&#39;)
+lims = data_frame(
+  lat   = c(-90, 90),
+  y_mol = coordinates(m)[1:2,2])
 
-# interpolate latidude in decimal degrees to Mollweide (m)
-brks = approx(
-  pts@data$lat, pts@data$y_mol,
-  c(-90, -50, 0, 50, 90))
-names(brks) = c(&#39;lat&#39;,&#39;y_mol&#39;)
-
-# plot histogram of records by latitude
-h = ggplot(
-  pts@data, aes(x=y_mol, weight=records/1000, fill=bottom_zone)) +
-  geom_histogram(bins=50) +
+# plot
+h = ggplot(aes(x=y_mol, y=records, colour=bottom_zone), data=h_d) +
+  geom_point() +
+  geom_line() +
+  scale_y_log10(
+    breaks = trans_breaks(&quot;log10&quot;, function(x) 10^x),
+    labels = trans_format(&quot;log10&quot;, math_format(10^.x))) +
+  scale_color_discrete(name=&#39;depth (m)&#39;) +
   scale_x_continuous(
-    name = &#39;latitude&#39;,
-    breaks = brks$y_mol,
-    labels = brks$lat,
-    expand = c(0,0)) +
-  scale_y_continuous(
-    expand = c(0,0)) +
-  scale_fill_discrete(name=&#39;depth (m)&#39;) +
-  labs(x=NULL, y=&#39;records x 1000&#39;) +
-  theme(legend.justification=c(1,0), legend.position=c(1,0)) +
-  coord_flip()
+    breaks=coordinates(m)[3:(3+length(seq(-90, 90, by=10))),2],
+    limits=lims$y_mol) +
+  coord_cartesian(
+    xlim = lims$y_mol, 
+    ylim = c(1,max(h_d$records*1.1)), expand=F) +
+  theme_bw() +
+  coord_flip() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.ticks.y = element_blank(), 
+    axis.text.y = element_blank(),
+    legend.justification = c(0,0),
+    legend.position      = c(0,0.65))
 
 # print to pdf
 h_pdf = &#39;fig/obis_hist.pdf&#39;
-pdf(h_pdf, width=2, height=4)
+pdf(h_pdf, width=2, height=6)
 print(h)
 invisible(dev.off())
 system(sprintf(&#39;open %s&#39;, h_pdf))
@@ -635,17 +671,19 @@ records_tot = d_s %&gt;%
   .$records_tot
 
 # plot time series
-s = ggplot(d_s, aes(x=year, weight=records/1000, fill=bottom_zone)) +
-  geom_histogram(binwidth=1) +
-  scale_y_continuous(
-    name = &#39;records x 1000&#39;,
-    expand = c(0.02,0)) +
-  scale_fill_discrete(name=&#39;depth (m)&#39;) +
-  theme(legend.justification=c(0,1), legend.position=c(0,1))
+s = ggplot(d_s, aes(x=year, y=records, color=bottom_zone)) +
+  geom_point() +
+  geom_line() +
+  scale_y_log10(
+    breaks = trans_breaks(&quot;log10&quot;, function(x) 10^x),
+    labels = trans_format(&quot;log10&quot;, math_format(10^.x))) +
+  scale_color_discrete(name=&#39;depth (m)&#39;) +
+  theme(legend.justification=c(0,1), legend.position=c(0,1)) +
+  theme_bw()
 
 # print to pdf
 s_pdf = &#39;fig/obis_ts.pdf&#39;
-pdf(s_pdf, width=4, height=2)
+pdf(s_pdf, width=3, height=1.5)
 print(s)
 invisible(dev.off())
 system(sprintf(&#39;open %s&#39;, s_pdf))
