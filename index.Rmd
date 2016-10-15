@@ -22,6 +22,7 @@ knitr::opts_chunk$set(echo=T, cache=T)
 # load libraries
 suppressPackageStartupMessages({
   library(raster)
+  library(readr)
   library(tibble)
   library(dplyr)
   library(tidyr)
@@ -30,6 +31,7 @@ suppressPackageStartupMessages({
   library(rgdal)
   library(ncdf4)
   library(scales)
+  select = dplyr::select
 })
 ```
 
@@ -326,6 +328,12 @@ h_d = h_d %>%
       lat_band = p$lat, 
       y_mol    = coordinates(m)[,2]),
     by = 'lat_band')
+write_csv(
+  h_d %>%
+    select(-y_mol) %>%
+    spread(bottom_zone, records) %>%
+    arrange(desc(lat_band)), 'data/obis_hist_lat_records.csv')
+
 lims = data_frame(
   lat   = c(-90, 90),
   y_mol = coordinates(m)[1:2,2])

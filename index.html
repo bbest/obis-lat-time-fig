@@ -11,7 +11,7 @@
 
 <meta name="author" content="Ben Best" />
 
-<meta name="date" content="2016-10-14" />
+<meta name="date" content="2016-10-15" />
 
 <title>OBIS records: shallow observations in pelagic and coastal zones</title>
 
@@ -240,7 +240,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">OBIS records: shallow observations in pelagic and coastal zones</h1>
 <h4 class="author"><em>Ben Best</em></h4>
-<h4 class="date"><em>2016-10-14</em></h4>
+<h4 class="date"><em>2016-10-15</em></h4>
 
 </div>
 
@@ -253,6 +253,7 @@ div.tocify {
 <pre class="r"><code># load libraries
 suppressPackageStartupMessages({
   library(raster)
+  library(readr)
   library(tibble)
   library(dplyr)
   library(tidyr)
@@ -261,6 +262,7 @@ suppressPackageStartupMessages({
   library(rgdal)
   library(ncdf4)
   library(scales)
+  select = dplyr::select
 })</code></pre>
 <div id="hist-by-depth" class="section level3">
 <h3>hist by depth</h3>
@@ -599,6 +601,12 @@ h_d = h_d %&gt;%
       lat_band = p$lat, 
       y_mol    = coordinates(m)[,2]),
     by = &#39;lat_band&#39;)
+write_csv(
+  h_d %&gt;%
+    select(-y_mol) %&gt;%
+    spread(bottom_zone, records) %&gt;%
+    arrange(desc(lat_band)), &#39;data/obis_hist_lat_records.csv&#39;)
+
 lims = data_frame(
   lat   = c(-90, 90),
   y_mol = coordinates(m)[1:2,2])
