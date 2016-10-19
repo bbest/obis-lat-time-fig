@@ -11,7 +11,7 @@
 
 <meta name="author" content="Ben Best" />
 
-<meta name="date" content="2016-10-15" />
+<meta name="date" content="2016-10-19" />
 
 <title>OBIS records: shallow observations in pelagic and coastal zones</title>
 
@@ -118,7 +118,8 @@ $(document).ready(function () {
 
 <!-- code folding -->
 <style type="text/css">
-.code-folding-btn { margin-bottom: 4px; }
+.code-folding-btn { margin-bottom: -22px; }
+.code-folding-btn.collapsed { margin-bottom: 4px; }
 </style>
 <script src="index_files/navigation-1.1/codefolding.js"></script>
 <script>
@@ -240,7 +241,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">OBIS records: shallow observations in pelagic and coastal zones</h1>
 <h4 class="author"><em>Ben Best</em></h4>
-<h4 class="date"><em>2016-10-15</em></h4>
+<h4 class="date"><em>2016-10-19</em></h4>
 
 </div>
 
@@ -253,6 +254,7 @@ div.tocify {
 <pre class="r"><code># load libraries
 suppressPackageStartupMessages({
   library(raster)
+  library(rgeos)
   library(readr)
   library(tibble)
   library(dplyr)
@@ -262,6 +264,8 @@ suppressPackageStartupMessages({
   library(rgdal)
   library(ncdf4)
   library(scales)
+  library(robis)
+  library(DT)
   select = dplyr::select
 })</code></pre>
 <div id="hist-by-depth" class="section level3">
@@ -563,8 +567,72 @@ system(sprintf(&#39;open %s&#39;, m_pdf))
 # output
 m</code></pre>
 <p><img src="index_files/figure-html/map%20mollweide-1.png" width="672" /></p>
-<p>TODO: - Consider proportion of area available to coastal vs pelagic, after removing land and accounting for latitudinal variation.</p>
 </div>
+</div>
+<div id="datasets-for-densest-cell" class="section level2">
+<h2>datasets for densest cell</h2>
+<p>The most dense cell (center at -80.5, 25.5)</p>
+<pre class="r"><code>occ_csv          = &#39;data/occurrences.csv&#39;
+occ_datasets_csv = &#39;data/occurrence_datasets.csv&#39;
+
+xy_wkt = function(x,y){
+  sprintf(
+    &#39;POLYGON((%g %g,%g %g,%g %g,%g %g,%g %g))&#39;,
+    x-0.5, y-0.5, x+0.5, y-0.5, x+0.5, y+0.5, x-0.5, y+0.5, x-0.5, y-0.5)
+}
+bb_wkt = xy_wkt(x=max_xy[1], y=max_xy[2])
+
+if (!file.exists(occ_datasets_csv)){
+
+  # retrieve occurrences for bbox from OBIS
+  system.time({
+    occ = occurrence(geometry=bb_wkt)  # 1,051,906 records; ~ 1.5 hrs
+  })
+  write_csv(occ, occ_csv)              # 621.6 MB
+  
+  # summarize
+  occ_datasets =
+    # dataset, year
+    occ %&gt;%
+    filter(yearcollected &gt;= 2000) %&gt;%
+    group_by(datasetName, yearcollected) %&gt;%
+    summarize(
+      records = n()) %&gt;%
+    spread(yearcollected, records) %&gt;%
+    # dataset, records since 2000
+    left_join(
+      occ %&gt;%
+      filter(yearcollected &gt;= 2000) %&gt;%
+      group_by(datasetName) %&gt;%
+      summarize(since2000 = n()),
+      by=&#39;datasetName&#39;) %&gt;%
+    # dataset, records since 2000
+    left_join(
+      occ %&gt;%
+      group_by(datasetName) %&gt;%
+      summarize(all = n()),
+      by=&#39;datasetName&#39;) %&gt;%
+    # sort by biggest
+    arrange(desc(all), datasetName)
+    
+  write_csv(occ_datasets, occ_datasets_csv, na=&#39;&#39;)
+
+} else {
+  occ_datasets = read_csv(occ_datasets_csv)
+}
+
+# table
+occ_datasets %&gt;%
+  arrange(desc(all), datasetName) %&gt;%
+  datatable() %&gt;%
+  formatCurrency(2:ncol(occ_datasets), currency=&#39;&#39;, interval=3, mark=&#39;,&#39;, digits=0)</code></pre>
+<div id="htmlwidget-ea569c4c8d242bc48949" style="width:100%;height:auto;" class="datatables html-widget"></div>
+<script type="application/json" data-for="htmlwidget-ea569c4c8d242bc48949">{"x":{"filter":"none","data":[["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","32"],["USGS South Florida Fish and Invertebrate Assessment Network Braun Blanquet","USGS South Florida Fish and Invertebrate Assessment Network Harvest","USGS South Florida Fish and Invertebrate Assessment Network Crustaceans","USGS South Florida Fish and Invertebrate Assessment Network Fish","National Benthic Infaunal Database","Florida Manatee Synoptic Aerial Survey 1991-2011","Atlantic and Gulf Rapid Reef Assessment - Fish","NOAAs Southeast Fishery Science Center (SEFSC) Fisheries Log Book System (FLS) Commercial Pelagic Logbook Data","Atlantic and Gulf Rapid Reef Assessment - Benthic","EPA'S EMAP Database","NMNH Invertebrate Zoology Collections","United States Geological Survey Nonindigenous Aquatic Species Database","Florida Manatee Mortality 1974-2010","North American Sessile Marine Invertebrate Survey","Diveboard - Scuba diving citizen science observations","Ocean Genome Resource","Nonindigenous Aquatic Species (NAS) Database All Marine Species Except Fish","Sizing Ocean Giants","United States Geological Survey Nonindigenous Aquatic Species Database Asian Tiger Shrimp’","ECOCEAN Whale Shark Photo-identification Library","AMAPPS Southeast Aerial Cruise Spring 2012","Bald Head Island 2005: Loggerhead Turtles (aggregated per 1-degree cell)","Bald Head Island 2007: Loggerhead Turtles (aggregated per 1-degree cell)","BOEM Sperm Whale Seismic Study (SWSS) S-Tag Argos Telemetry (aggregated per 1-degree cell)","Casey Key Loggerheads 2009 (aggregated per 1-degree cell)","Casey Key Loggerheads 2011 (aggregated per 1-degree cell)","Cayman Islands 2005: Green Turtles (aggregated per 1-degree cell)","Duke North Atlantic Turtle Tracking (aggregated per 1-degree cell)","Florida Loggerhead Migrations (aggregated per 1-degree cell)","Georgia Loggerhead Tracking Project 2004 (aggregated per 1-degree cell)","North Carolina Long-Term Sea Turtle Monitoring Project (aggregated per 1-degree cell)","Virginia Aquarium Stranding Response Program (aggregated per 1-degree cell)"],[null,null,null,null,616,87,null,55,null,88,null,3,11,null,24,null,null,1,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,56,null,1,null,267,null,3,20,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,1,null,null,null],[null,null,null,null,null,39,null,null,null,162,null,1,15,null,null,null,4,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,300,1326,null,1122,116,null,2,14,null,null,null,2,null,null,null,null,null,null,1,null,null,null,null,null,null,null,null],[null,null,null,null,null,66,null,null,null,264,null,4,11,433,null,null,2,1,null,null,null,null,null,null,null,null,null,1,null,1,null,null],[66378,44198,1484,5111,null,82,null,null,null,null,11,3,8,null,7,null,1,null,null,1,null,null,null,null,null,null,null,null,null,null,null,null],[65376,44345,7688,6109,null,83,null,null,null,null,1,3,15,null,null,null,null,2,null,null,null,1,null,null,null,null,1,null,null,null,null,null],[130656,44394,6459,4995,null,51,null,null,null,null,null,1,15,null,1,null,null,null,null,1,null,null,1,null,null,null,null,null,null,null,null,1],[130176,null,5724,4811,null,null,null,null,null,null,1,null,11,null,null,null,null,1,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[133620,null,5282,5036,null,58,null,null,null,null,null,43,18,null,null,null,null,1,null,null,null,null,null,null,1,null,null,null,null,null,null,null],[138587,null,6754,4962,null,64,null,null,null,null,null,281,86,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,1,null],[130320,null,7806,6427,null,139,null,null,null,null,null,156,null,null,30,20,null,null,null,null,null,null,null,null,null,1,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null,null,33,null,null,28,null,null,null,2,null,1,null,null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null,null,7,null,null,52,null,null,null,1,null,null,null,null,null,null,null,null,null,null,null,null,null],[null,null,null,null,null,null,null,null,null,null,null,null,null,null,107,null,null,null,2,null,null,null,null,null,null,null,null,null,null,null,null,null],[795113,132937,41197,37451,616,1025,1326,56,1122,897,13,540,224,433,249,20,9,6,5,2,1,1,1,1,1,1,1,1,1,1,1,1],[795113,132937,41197,37451,17586,1767,1326,1217,1122,897,831,561,471,433,249,20,10,9,5,2,1,1,1,1,1,1,1,1,1,1,1,1]],"container":"<table class=\"display\">\n  <thead>\n    <tr>\n      <th> \u003c/th>\n      <th>datasetName\u003c/th>\n      <th>2000\u003c/th>\n      <th>2001\u003c/th>\n      <th>2002\u003c/th>\n      <th>2003\u003c/th>\n      <th>2004\u003c/th>\n      <th>2005\u003c/th>\n      <th>2006\u003c/th>\n      <th>2007\u003c/th>\n      <th>2008\u003c/th>\n      <th>2009\u003c/th>\n      <th>2010\u003c/th>\n      <th>2011\u003c/th>\n      <th>2012\u003c/th>\n      <th>2013\u003c/th>\n      <th>2014\u003c/th>\n      <th>since2000\u003c/th>\n      <th>all\u003c/th>\n    \u003c/tr>\n  \u003c/thead>\n\u003c/table>","options":{"columnDefs":[{"className":"dt-right","targets":[2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]},{"orderable":false,"targets":0}],"order":[],"autoWidth":false,"orderClasses":false,"rowCallback":"function(row, data) {\nDTWidget.formatCurrency(this, row, data, 2, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 3, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 4, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 5, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 6, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 7, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 8, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 9, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 10, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 11, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 12, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 13, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 14, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 15, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 16, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 17, '', 0, 3, ',', '.', true);\nDTWidget.formatCurrency(this, row, data, 18, '', 0, 3, ',', '.', true);\n}"}},"evals":["options.rowCallback"],"jsHooks":[]}</script>
+<ul>
+<li><a href="https://www.sciencebase.gov/catalog/item/53a1b920e4b0403a44154544">USGS South Florida Fish and Invertebrate Assessment Network- Braun Blanquet</a></li>
+<li><a href="https://www.sciencebase.gov/catalog/item/53a1cc5fe4b0403a441545a5">USGS South Florida Fish and Invertebrate Assessment Network- Harvest - ScienceBase-Catalog</a></li>
+</ul>
+<p>TODO: - Consider proportion of area available to coastal vs pelagic, after removing land and accounting for latitudinal variation.</p>
 </div>
 <div id="hist-by-latitude" class="section level2">
 <h2>hist by latitude</h2>

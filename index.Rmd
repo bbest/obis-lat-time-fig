@@ -22,6 +22,7 @@ knitr::opts_chunk$set(echo=T, cache=T)
 # load libraries
 suppressPackageStartupMessages({
   library(raster)
+  library(rgeos)
   library(readr)
   library(tibble)
   library(dplyr)
@@ -31,6 +32,8 @@ suppressPackageStartupMessages({
   library(rgdal)
   library(ncdf4)
   library(scales)
+  library(robis)
+  library(DT)
   select = dplyr::select
 })
 ```
@@ -287,6 +290,70 @@ system(sprintf('open %s', m_pdf))
 # output
 m
 ```
+
+## datasets for densest cell
+
+The most dense cell (center at `r max_xy`)
+
+```{r inspect densest cell, message=F, warning=F}
+occ_csv          = 'data/occurrences.csv'
+occ_datasets_csv = 'data/occurrence_datasets.csv'
+
+xy_wkt = function(x,y){
+  sprintf(
+    'POLYGON((%g %g,%g %g,%g %g,%g %g,%g %g))',
+    x-0.5, y-0.5, x+0.5, y-0.5, x+0.5, y+0.5, x-0.5, y+0.5, x-0.5, y-0.5)
+}
+bb_wkt = xy_wkt(x=max_xy[1], y=max_xy[2])
+
+if (!file.exists(occ_datasets_csv)){
+
+  # retrieve occurrences for bbox from OBIS
+  system.time({
+    occ = occurrence(geometry=bb_wkt)  # 1,051,906 records; ~ 1.5 hrs
+  })
+  write_csv(occ, occ_csv)              # 621.6 MB
+  
+  # summarize
+  occ_datasets =
+    # dataset, year
+    occ %>%
+    filter(yearcollected >= 2000) %>%
+    group_by(datasetName, yearcollected) %>%
+    summarize(
+      records = n()) %>%
+    spread(yearcollected, records) %>%
+    # dataset, records since 2000
+    left_join(
+      occ %>%
+      filter(yearcollected >= 2000) %>%
+      group_by(datasetName) %>%
+      summarize(since2000 = n()),
+      by='datasetName') %>%
+    # dataset, records since 2000
+    left_join(
+      occ %>%
+      group_by(datasetName) %>%
+      summarize(all = n()),
+      by='datasetName') %>%
+    # sort by biggest
+    arrange(desc(all), datasetName)
+    
+  write_csv(occ_datasets, occ_datasets_csv, na='')
+
+} else {
+  occ_datasets = read_csv(occ_datasets_csv)
+}
+
+# table
+occ_datasets %>%
+  arrange(desc(all), datasetName) %>%
+  datatable() %>%
+  formatCurrency(2:ncol(occ_datasets), currency='', interval=3, mark=',', digits=0)
+```
+
+- [USGS South Florida Fish and Invertebrate Assessment Network- Braun Blanquet](https://www.sciencebase.gov/catalog/item/53a1b920e4b0403a44154544)
+- [USGS South Florida Fish and Invertebrate Assessment Network- Harvest - ScienceBase-Catalog](https://www.sciencebase.gov/catalog/item/53a1cc5fe4b0403a441545a5)
 
 TODO:
 - Consider proportion of area available to coastal vs pelagic, after removing land and accounting for latitudinal variation.
